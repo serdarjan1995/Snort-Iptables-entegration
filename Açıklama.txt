@@ -1,0 +1,209 @@
+﻿Bu dosya içerisinde yazılımların ayarlanması için gerekli işlemler anlatılmıştır.
+Bu işlemlerin aynısı detaylı olarak Doc klasörü içerisindeki raporun 5. bölümünde anlatılmıştır.
+
+Öncelik olarak yazılımların kurulması için CD içerisindeki Run klasörü içerisinde bulunan install_script.sh dosyasını çalıştırılmalıdır.
+Dosya için çalıştırma izni verilmelidir ve sudo olarak çalıştırmalıdır.
+	sudo chmod 755 install_script.sh
+	sudo ./install_script.sh
+
+
+
+
+
+=======SNORT ayarları=======
+Snort ayar dosyası uygun text editör ile açılır:
+sudo vi /etc/snort/snort.conf
+
+Aşağıdaki satırları bulunur, buradaki <server public IP> SNORT dinleme yapılan IP aralıktır. IP aralık yada tek IP (/32) sisteme göre değiştirilir:
+
+	#  Setup the network addresses you are protecting
+	ipvar HOME_NET 192.168.111.0/24 		# (line: 45) Change this to your internal network
+
+Dış ağı:
+	# Set up the external network addresses. Leave as "any" in most situations
+	ipvar EXTERNAL_NET !$HOME_NET
+
+Kural dizinleri:
+	# Path to your rules files (this can be a relative path)
+	var RULE_PATH /etc/snort/rules						# line 104
+	var SO_RULE_PATH /etc/snort/so_rules				# line 105
+	var PREPROC_RULE_PATH /etc/snort/preproc_rules		# line 104
+
+Beyaz liste ve kara liste dizinleri:
+	# Set the absolute path appropriately
+	var WHITE_LIST_PATH /etc/snort/rules/iplists		# line 113
+	var BLACK_LIST_PATH /etc/snort/rules/iplists		# line 114
+
+PulledPork tarafından otomatik indirilen kurallar için ayar dosyanın 7. bölümüne aşağıdaki satır eklenmelidir:
+	include $RULE_PATH/snort.rules
+
+Barnyard2 için snort loglarının output dosyası yazılır:
+	output unified2: filename snort.u2, limit 128
+
+	
+	
+	
+====================================
+=======PulledPork ayarlanması=======
+PulledPork ayarlarının yapılması için /etc/snort/pulledpork.conf dosyasının text editör ile açılması gerekir:
+	sudo vi /etc/snort/pulledpork.conf
+
+Aşağıdaki satırları bularak uygun ayarların yazılması gerekir:
+<oink code> olan tüm yerlerın www.snort.org kullanıcı kaydı yapıldıktan sonra alınmış olan oink kodunu buraya yapıştırılması gerekir \#satır 19, 22
+
+Dosya konumlarının aşağıdaki gibi güncellenmesi gerekir ve satır başında \# varsa silinmesi gerekir:
+	74: rule_path=/etc/snort/rules/snort.rules
+	89: local_rules=/etc/snort/rules/local.rules
+	92: sid_msg=/etc/snort/sid-msg.map
+	96: sid_msg_version=2 					#for barnyard2
+	119: config_path=/etc/snort/snort.conf
+	133: distro=Ubuntu-16-4					#!!Should be written current OS that has been using
+	141: black_list=/etc/snort/rules/iplists/default.blacklist
+	150: IPRVersion=/etc/snort/rules/iplists
+	195: snort_version=2.9.11.1				#!!Should be written current Snort version that has been using
+	199: enablesid=/etc/snort/enablesid.conf
+	200: dropsid=/etc/snort/dropsid.conf
+	201: disablesid=/etc/snort/disablesid.conf
+	202: modifysid=/etc/snort/modifysid.conf
+
+Gerekli olan tüm ayarlar yapılmıştır.
+Tüm kurallar /etc/snort/rules/snort.rules dosyası içerisinde yazılır.
+Bu dosya PulledPork ilk kez çalıştırıldığında üretilir.
+	sudo /usr/local/bin/pulledpork.pl -c /etc/snort/pulledpork.conf -l -v
+
+Pulledpork otomatik çalıştırılması için bir schedule oluşturmamız yeterlidir.
+"sudo crontab {-}e" komutu çalıştırılıp aşağıdaki satırın eklenmesi gerekir:
+	30 12 * * * /usr/local/bin/pulledpork.pl -c /etc/snort/pulledpork.conf -l
+
+
+
+===================================
+=======Barnyard2 ayarlanması=======
+
+barnyard2.conf ayar dosyasının düzenlenmesi:
+	sudo vi /etc/snort/barnyard2.conf
+
+Dosya içerisine aşağıdaki satır yazılır:
+	output database: log, mysql, user=snort password=MYSQLSNORTPASSWORD dbname=snort host=localhost sensorname=sensor01
+
+	
+	
+============================================
+=======MySQL veritabanı oluşturulması=======
+MySQL veritabanı oluşturma script'i CD içerisinde Database klasörü içerisinde bulunmaktadır.
+Aşağıdaki komutlar veritabanını oluşturur.  
+$ 	mysql -u root -p 
+	mysql> source PATH_TO_CD/Database/create_mysql
+	mysql> CREATE USER 'snort'@'localhost' IDENTIFIED BY 'MYSQLSNORTPASSWORD';
+	mysql> grant create, insert, select, delete, update on snort.* to 'snort'@'localhost';
+	mysql> exit
+
+	
+	
+	
+======================================================================
+=======SNORT ve Barnyard2 servislerinin otomatik çalıştırılması=======
+Yeni service dosyası oluşturulması gerekir ( otomatik oluşturulur ve text editor açılır):
+	sudo vi /lib/systemd/system/snort.service
+
+Oluşturulmuş dosya içerisine şu satırlar yazılır:
+	[Unit]
+	Description=Snort NIDS Daemon
+	After=syslog.target network.target
+ 
+	[Service]
+	Type=simple
+	ExecStart=/usr/local/bin/snort -q -u snort -g snort -c /etc/snort/snort.conf -i ens33
+ 
+	[Install]
+	WantedBy=multi-user.target
+
+
+__________________________________________________________________
+Sıradaki işlem Barnyard2 içindir:
+	sudo vi /lib/systemd/system/barnyard2.service
+
+Dosya içerisine yazılacak satırlar:
+	[Unit]
+	Description=Barnyard2 Daemon
+	After=syslog.target network.target
+ 
+	[Service]
+	Type=simple
+	ExecStart=/usr/local/bin/barnyard2 -c /etc/snort/barnyard2.conf -d /var/log/snort -f snort.u2 -q -w /var/log/snort barnyard2.waldo -g snort -u snort -D -a /var/log/snort/archived_logs
+ 
+	[Install]
+	WantedBy=multi-user.target
+
+Servisleri aktif hale getirmek için aşağıdaki komutlar yazılır:
+	sudo systemctl enable snort
+	sudo systemctl start snort
+	sudo systemctl enable barnyard2
+	sudo systemctl start barnyard2
+
+	
+	
+	
+==============================
+=======BASE ayarlanması=======
+
+	sudo vi /var/www/html/base/base_conf.php
+	
+base_conf dosyasını text editörde açarak aşağıdaki satırlar değiştirilir:
+
+	$BASE_urlpath = '/base';						#line 50
+	$DBlib_path = '/var/adodb/';					#line 80
+	$DBtype = 'mysql'; 								#line 90
+	$alert_dbname   = 'snort';						#line 102
+	$alert_user     = 'snort';						#line 105
+	$alert_password = 'MYSQLSNORTPASSWORD';			#line 106
+
+	//$graph_font_name = "Verdana";					#line 456
+	//$graph_font_name = "DejaVuSans";				#line 457
+	//$graph_font_name = "Image_Graph_Font";		#line 458
+	$graph_font_name = "";							#line 459
+
+
+	
+	
+===============================
+=======Iptables ayarları=======
+Iptables yüklu olan makine gelen ve giden tüm paketleri değiştirmeden yönlendirmesi gerekir.
+Bunun için uygun kuralların girilmesi gerekir:
+	sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+	sudo iptables -A FORWARD -i eth0 -o eth1 -j ACCEPT
+	sudo iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT
+  
+Ayrıca Linux IP yönlendirme özelliğini açılması gerekir.
+Bunun için 'root' kullanıcı hesabından aşağıdaki komut çalıştırılması yeterlidir:
+	echo 1 > /proc/sys/net/ipv4/ip_forward
+
+CD/Run içersinde bulunan iptables.xslt '/etc/iptables' dizini içerisine kopyalanması gerekir.
+	sudo cp PATH_TO_CD/Run/iptables.xslt /etc/iptables/	
+	
+	
+	
+===============================================================
+=======Iptables-Snort entegrasyon yazılımı (SnortShield)=======
+CD/Code içersinde bulunan snort_shield.py '/etc/snort/snortShield' dizini içerisine kopyalanması gerekir.
+	sudo cp PATH_TO_CD/Code/snort_shield.py /etc/snort/snortShield
+
+
+Yazılım daemon olarak çalışabilmektedir. Bunun için aşağıdaki dosya oluşturulup içerisine yazılması gereken bilgiler yer almaktadır:
+	sudo vi /lib/systemd/system/snort_shield.service
+
+Dosya içerisine yazılması gereken:
+
+	[Unit]
+	Description=Snort Shield Daemon
+	[Service]
+	Type=simple
+	ExecStart=/etc/snort/snortShield/snort_shield.py
+	[Install]
+	WantedBy=multi-user.target
+	
+
+
+
+
+
